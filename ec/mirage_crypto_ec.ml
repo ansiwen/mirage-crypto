@@ -216,11 +216,28 @@ module Make_field_element (P : Parameters) (F : Foreign) : Field_element = struc
     b_uts tmp
 end
 
+module Make_field_element_trans (P : Parameters) (F : Foreign) : Field_element = struct
+  include Make_field_element(P)(F)
+
+  let b_uts b = Bytes.unsafe_to_string b
+
+  let from_be_octets buf =
+    let buf_rev = rev_string buf in
+    let tmp = create () in
+    F.from_octets tmp buf_rev;
+    b_uts tmp
+
+  let from_montgomery a = a
+
+end
+
+
 module type Point = sig
   type point
   val is_infinity : point -> bool
   val of_octets : string -> (point, error) result
   val to_octets : compress:bool -> point -> string
+  val to_affine : point -> (string * string) option
   val to_affine_raw : point -> (field_element * field_element) option
   val x_of_finite_point : point -> string
   val scalar_mult : scalar -> point -> point
@@ -658,8 +675,7 @@ end
   This is an alternative Point implementation, that uses
     - concatenated affine coordinates as used by ECCKiila generated code
 *)
-module Make_point_r1 (P : Parameters) (F : Foreign_kiila) : Point = struct
-  module Fe = Make_field_element(P)(F)
+module Make_point_r1 (P : Parameters) (F : Foreign_kiila) (Fe : Field_element): Point = struct
   include Point_kiila
 
   let make x  y = Point (String.cat x y)
@@ -916,6 +932,7 @@ module type Foreign_n = sig
 end
 
 module type Fn = sig
+  val from_octets_raw : string -> field_element
   val from_be_octets : string -> field_element
   val to_be_octets : field_element -> string
   val mul : field_element -> field_element -> field_element
@@ -932,6 +949,11 @@ module Make_Fn (P : Parameters) (F : Foreign_n) : Fn = struct
   let create () = Bytes.create P.fe_length
 
   let create_octets () = Bytes.create P.byte_length
+
+  let from_octets_raw v =
+    let v' = create () in
+    F.from_bytes v' v;
+    b_uts v'
 
   let from_be_octets v =
     let v' = create () in
@@ -1070,9 +1092,10 @@ module Make_dsa (Param : Parameters) (F : Fn) (P : Point) (S : Scalar) (H : Dige
     (d, q)
 
   let x_of_finite_point_mod_n p =
-    match P.to_affine_raw p with
+    match P.to_affine p with
     | None -> None
     | Some (x, _) ->
+      let x = F.from_octets_raw x in
       let x = F.mul x F.one in
       Some (F.to_be_octets x)
 
@@ -1193,7 +1216,8 @@ module P256 : Dh_dsa  = struct
     external to_montgomery : out_field_element -> field_element -> unit = "mc_np256_to_montgomery" [@@noalloc]
   end
 
-  module P = Make_point_r1(Params)(Foreign)
+  module Fe = Make_field_element(Params)(Foreign)
+  module P = Make_point_r1(Params)(Foreign)(Fe)
   module S = Make_scalar(Params)(P)
   module Dh = Make_dh(Params)(P)(S)
   module Fn = Make_Fn(Params)(Foreign_n)
@@ -1324,22 +1348,28 @@ module P521 : Dh_dsa = struct
   end
 
   module Foreign = struct
-    include Point_proj
+    include Point_kiila
     external mul : out_field_element -> field_element -> field_element -> unit = "mc_p521_mul" [@@noalloc]
     external sub : out_field_element -> field_element -> field_element -> unit = "mc_p521_sub" [@@noalloc]
     external add : out_field_element -> field_element -> field_element -> unit = "mc_p521_add" [@@noalloc]
-    external to_montgomery : out_field_element -> field_element -> unit = "mc_p521_to_montgomery" [@@noalloc]
+    let to_montgomery _out _in = assert false
     external from_octets : out_field_element -> string -> unit = "mc_p521_from_bytes" [@@noalloc]
     external set_one : out_field_element -> unit = "mc_p521_set_one" [@@noalloc]
-    external nz : field_element -> bool = "mc_p521_nz" [@@noalloc]
     external sqr : out_field_element -> field_element -> unit = "mc_p521_sqr" [@@noalloc]
-    external from_montgomery : out_field_element -> field_element -> unit = "mc_p521_from_montgomery" [@@noalloc]
+    let from_montgomery _out _in = assert false
     external to_octets : bytes -> field_element -> unit = "mc_p521_to_bytes" [@@noalloc]
     external inv : out_field_element -> field_element -> unit = "mc_p521_inv" [@@noalloc]
     external select_c : out_field_element -> bool -> field_element -> field_element -> unit = "mc_p521_select" [@@noalloc]
-    external double_c : out_point -> point -> unit = "mc_p521_point_double" [@@noalloc]
-    external add_c : out_point -> point -> point -> unit = "mc_p521_point_add" [@@noalloc]
     external scalar_mult_base_c : out_point -> string -> unit = "mc_p521_scalar_mult_base" [@@noalloc]
+    external scalar_mult_c : out_point -> string -> point -> unit = "mc_p521_scalar_mult" [@@noalloc]
+    external scalar_mult_add_c : out_point -> string -> string -> point -> unit = "mc_p521_scalar_mult_add" [@@noalloc]
+    let nz =
+      let zero = Bytes.make Params.byte_length '\000' in
+      fun x ->
+        let tmp = Bytes.create Params.byte_length in
+        to_octets tmp x;
+        not (Bytes.equal tmp zero)
+
   end
 
   module Foreign_n = struct
@@ -1353,7 +1383,8 @@ module P521 : Dh_dsa = struct
     external to_montgomery : out_field_element -> field_element -> unit = "mc_np521_to_montgomery" [@@noalloc]
   end
 
-  module P = Make_point(Params)(Foreign)
+  module Fe = Make_field_element_trans(Params)(Foreign)
+  module P = Make_point_r1(Params)(Foreign)(Fe)
   module S = Make_scalar(Params)(P)
   module Dh = Make_dh(Params)(P)(S)
   module Fn = Make_Fn(Params)(Foreign_n)
