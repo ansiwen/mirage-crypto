@@ -1324,7 +1324,7 @@ module P521 : Dh_dsa = struct
   end
 
   module Foreign = struct
-    include Point_proj
+    include Point_kiila
     external mul : out_field_element -> field_element -> field_element -> unit = "mc_p521_mul" [@@noalloc]
     external sub : out_field_element -> field_element -> field_element -> unit = "mc_p521_sub" [@@noalloc]
     external add : out_field_element -> field_element -> field_element -> unit = "mc_p521_add" [@@noalloc]
@@ -1337,9 +1337,9 @@ module P521 : Dh_dsa = struct
     external to_octets : bytes -> field_element -> unit = "mc_p521_to_bytes" [@@noalloc]
     external inv : out_field_element -> field_element -> unit = "mc_p521_inv" [@@noalloc]
     external select_c : out_field_element -> bool -> field_element -> field_element -> unit = "mc_p521_select" [@@noalloc]
-    external double_c : out_point -> point -> unit = "mc_p521_point_double" [@@noalloc]
-    external add_c : out_point -> point -> point -> unit = "mc_p521_point_add" [@@noalloc]
     external scalar_mult_base_c : out_point -> string -> unit = "mc_p521_scalar_mult_base" [@@noalloc]
+    external scalar_mult_c : out_point -> string -> point -> unit = "mc_p521_scalar_mult" [@@noalloc]
+    external scalar_mult_add_c : out_point -> string -> string -> point -> unit = "mc_p521_scalar_mult_add" [@@noalloc]
   end
 
   module Foreign_n = struct
@@ -1353,7 +1353,7 @@ module P521 : Dh_dsa = struct
     external to_montgomery : out_field_element -> field_element -> unit = "mc_np521_to_montgomery" [@@noalloc]
   end
 
-  module P = Make_point(Params)(Foreign)
+  module P = Make_point_r1(Params)(Foreign)
   module S = Make_scalar(Params)(P)
   module Dh = Make_dh(Params)(P)(S)
   module Fn = Make_Fn(Params)(Foreign_n)
